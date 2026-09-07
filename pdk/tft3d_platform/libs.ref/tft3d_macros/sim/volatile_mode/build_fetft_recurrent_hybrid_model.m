@@ -1,4 +1,4 @@
-function simOut = build_fetft_recurrent_hybrid_model(runSimulation)
+function simOut = build_fetft_recurrent_hybrid_model(runSimulation, cfg)
 %BUILD_FETFT_RECURRENT_HYBRID_MODEL Create a recurrent Preisach-retention model.
 %
 % This model implements the stronger hybrid interaction:
@@ -19,9 +19,19 @@ function simOut = build_fetft_recurrent_hybrid_model(runSimulation)
 % FeFETs With Gate Stack Engineering and Compact Long-Term Retention Model,"
 % IEEE Journal of the Electron Devices Society, vol. 10, pp. 115-122, 2022,
 % doi: 10.1109/JEDS.2022.3142046.
+%
+% NLS domain-population/rate abstraction adapted from:
+% N. Gong et al., "Nucleation limited switching (NLS) model for HfO2-based
+% metal-ferroelectric-metal (MFM) capacitors: Switching kinetics and
+% retention characteristics," Applied Physics Letters, vol. 112, 262903,
+% 2018, doi: 10.1063/1.5010207.
 
 if nargin < 1
     runSimulation = true;
+end
+
+if nargin < 2 || isempty(cfg)
+    cfg = struct();
 end
 
 if isempty(ver('simulink'))
@@ -34,15 +44,20 @@ modelFile = fullfile(thisDir, [modelName '.slx']);
 resultsFile = fullfile(thisDir, 'fetft_recurrent_hybrid_results.mat');
 plotFile = fullfile(thisDir, 'fetft_recurrent_hybrid_response.png');
 
-params = defaultParameters();
-recurrentHybridInput = fetft_recurrent_hybrid_dataset(params.tStop, params.dt);
+params = defaultParameters(cfg);
+recurrentHybridInput = fetft_recurrent_hybrid_dataset(params.tStop, params.dt, cfg);
 assignin('base', 'recurrentHybridInput', recurrentHybridInput);
+assignin('base', 'fetftRecurrentHybridCfg', cfg);
 
 if bdIsLoaded(modelName)
     close_system(modelName, 0);
 end
 
 new_system(modelName);
+initFcn = sprintf(['if ~exist(''fetftRecurrentHybridCfg'', ''var''), ', ...
+    'fetftRecurrentHybridCfg = struct(); end; ', ...
+    'recurrentHybridInput = fetft_recurrent_hybrid_dataset(%0.17g, %0.17g, fetftRecurrentHybridCfg);'], ...
+    params.tStop, params.dt);
 set_param(modelName, ...
     'StopTime', num2str(params.tStop), ...
     'Solver', 'FixedStepDiscrete', ...
@@ -50,7 +65,7 @@ set_param(modelName, ...
     'SaveOutput', 'on', ...
     'ReturnWorkspaceOutputs', 'on', ...
     'SignalLogging', 'off', ...
-    'InitFcn', 'recurrentHybridInput = fetft_recurrent_hybrid_dataset;');
+    'InitFcn', initFcn);
 
 createBlocks(modelName);
 save_system(modelName, modelFile);
@@ -69,9 +84,15 @@ end
 
 end
 
-function params = defaultParameters()
+function params = defaultParameters(cfg)
 params.tStop = 80e-6;
 params.dt = 5e-8;
+if isfield(cfg, 'tStop')
+    params.tStop = cfg.tStop;
+end
+if isfield(cfg, 'dt')
+    params.dt = cfg.dt;
+end
 end
 
 function createBlocks(modelName)
@@ -83,24 +104,18 @@ add_block('simulink/Sources/From Workspace', block('Recurrent hybrid input'), ..
     'OutputAfterFinalValue', 'Holding final value', ...
     'Position', [80 265 255 310]);
 
+signals = fetft_recurrent_hybrid_signal_names();
 add_block('simulink/Signal Routing/Demux', block('output demux'), ...
-    'Outputs', '20', ...
-    'Position', [335 35 340 795]);
-
-signals = { ...
-    'phase', 'writeCommand', 'vEff17', 'vEff18', ...
-    'pStart17', 'pStart18', 'pTarget17', 'pTarget18', ...
-    'p17Preisach', 'p18Preisach', 'p17', 'p18', ...
-    'dPProgrammed', 'retentionFactor', 'dP', ...
-    'loopGain', 'polarizationGain', 'dVQ', 'senseMargin', 'refreshNeeded'};
+    'Outputs', num2str(numel(signals)), ...
+    'Position', [335 35 340 50 + 30 * numel(signals)]);
 
 for idx = 1:numel(signals)
-    y = 15 + 36 * idx;
+    y = 15 + 30 * idx;
     outBlock = block(['to_' signals{idx}]);
     add_block('simulink/Sinks/To Workspace', outBlock, ...
         'VariableName', signals{idx}, ...
         'SaveFormat', 'Structure With Time', ...
-        'Position', [430 y 585 y + 22]);
+        'Position', [430 y 585 y + 20]);
     add_line(modelName, sprintf('output demux/%d', idx), ...
         ['to_' signals{idx} '/1'], 'autorouting', 'on');
 end
@@ -124,7 +139,7 @@ add_line(modelName, 'scope mux/1', 'Recurrent interaction scope/1', 'autorouting
 annotationText = sprintf([ ...
     'Recurrent hybrid model for volatile FeTFT bitcell\n', ...
     'WRITE: Preisach programming from the current relaxed P state. No NLS switching during write.\n', ...
-    'HOLD/READ: NLS/detrapping relaxes P; the relaxed P is fed into the next write.']);
+    'HOLD/READ: Gong/Mo-style NLS domain populations and rates relax P; the relaxed P is fed into the next write.']);
 annotation = Simulink.Annotation(modelName, annotationText);
 annotation.Position = [40 420 835 500];
 

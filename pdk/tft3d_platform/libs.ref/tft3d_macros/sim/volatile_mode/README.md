@@ -29,6 +29,9 @@ The Preisach programming abstraction is adapted from K. Ni, M. Jerry, J. A. Smit
 - `fetft_preisach_sequence_vector.m`: equation helper called by the full write-hold-read Preisach sequence model.
 - `fetft_preisach_sequence_dataset.m`: generates the deterministic time/value matrix consumed by the full write-hold-read Simulink model.
 - `fetft_recurrent_hybrid_dataset.m`: generates the deterministic repeated write-hold-read schedule consumed by the recurrent hybrid Simulink model.
+- `fetft_recurrent_hybrid_signal_names.m`: defines the recurrent hybrid Simulink output order, including scalar state, NLS domain fractions, NLS rates, hold-field terms, and Preisach history terms.
+- `fetft_strict_harness_checks.m`: runs the DOCX-derived debug oracles for freeze/no-drive controls, fixed-rate domain kinetics, handoff continuity, field sweeps, same-P/different-domain states, checkpoint replay, and the long-hold end-to-end sequence.
+- `fetft_preisach_reference_sweep.m`: runs the reduced Ni-style programming reference sweep across amplitude, pulse width, polarity, and starting state.
 - `run_fefet_combined_model_testbench.m`: runs the DOCX-derived combined-model verification cases against the current Simulink/MATLAB models.
 - `run_fefet_paper_limited_testbench.m`: runs the paper-limited verification audit using only the attached Preisach and NLS papers as the source of requirements.
 - `run_fetft_dynamic_cell_equations.py`: runs the same equations without MATLAB/Simulink for license-independent validation.
@@ -112,6 +115,48 @@ dP = P17 - P18 = P_NF2 - P_NF1
 P17 = P_EQ + dP/2
 P18 = P_EQ - dP/2
 ```
+
+The recurrent hybrid model also exports explicit NLS domain-population bins for each FeTFT branch, following Gong's nucleation-limited multiple-domain interpretation:
+
+```text
+P17 = sum_i w_i * (2*f17_i - 1)
+P18 = sum_i w_i * (2*f18_i - 1)
+sum_i w_i = 1
+0 <= f17_i, f18_i <= 1
+```
+
+During WRITE, the Ni-style Preisach programming law updates the branch polarization and the model projects that written polarization onto the domain-population bins. NLS rates are held at zero during WRITE so switching kinetics are not duplicated.
+
+During HOLD and READ, the domain bins evolve with equivalent NLS rates derived from the Mo/Gong retention picture:
+
+```text
+V_FE = E_dep + E_hold + E_imp
+E_dep = -K_dep * P
+tau_i(V_FE) = tau0 * exp((V0_i / |V_FE|)^n)
+r_i = 1 / tau_i(V_FE)
+```
+
+The sign of `V_FE` selects the active direction: positive `V_FE` drives `rPlus_i`, negative `V_FE` drives `rMinus_i`. This is a compact equivalent-rate implementation of the papers' NLS switching-time formulation, not a claim that either paper provides this exact Simulink signal interface.
+
+The recurrent model additionally exports compact Preisach history terms per branch:
+
+```text
+historyBranch, historyTurnV, historyTurnP, historyDepth
+```
+
+These are the serializable state terms used by this reduced model to preserve Ni-style branch direction and minor-loop starting point across WRITE/HOLD/READ boundaries.
+
+For strict verification, the recurrent dataset generator also accepts optional debug controls:
+
+```text
+programmingEnable / programming_enable
+retentionEnable / retention_enable
+K_dep, E_hold, E_imp
+fixedRateEnable, fixedRPlus, fixedRMinus
+domainWeights, initialF17, initialF18, segments
+```
+
+These controls are intended for testbench isolation only. The default model path keeps programming enabled during WRITE, retention enabled during HOLD/READ, and NLS rates disabled during WRITE.
 
 In the first retention-only model, the simplified WRITE initializer creates a partial polarization difference:
 
@@ -218,10 +263,22 @@ To run the combined-model verification cases from `FeFET_Combined_Model_Testbenc
 run_fefet_combined_model_testbench
 ```
 
+To run only the strict debug-oracle checks without rebuilding the Simulink diagrams:
+
+```matlab
+strict = fetft_strict_harness_checks
+```
+
 To run the paper-limited audit derived only from the attached Preisach and NLS papers:
 
 ```matlab
 run_fefet_paper_limited_testbench
+```
+
+To run only the reduced Preisach reference sweep:
+
+```matlab
+sweep = fetft_preisach_reference_sweep
 ```
 
 If MATLAB licensing is unavailable, run the equation-level fallback from PowerShell:

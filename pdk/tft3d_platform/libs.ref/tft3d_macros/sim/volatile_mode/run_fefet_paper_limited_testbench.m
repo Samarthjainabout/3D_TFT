@@ -29,10 +29,9 @@ matFile = fullfile(thisDir, 'fetft_paper_limited_testbench_results.mat');
 fprintf('Running paper-limited Simulink/MATLAB checks...\n');
 recurrentOut = build_fetft_recurrent_hybrid_model(true);
 sequenceOut = build_fetft_preisach_sequence_model(true);
+preisachSweep = fetft_preisach_reference_sweep();
 
-recurrent = collectSignals(recurrentOut, { ...
-    'phase', 'writeCommand', 'pStart17', 'pStart18', 'p17', 'p18', ...
-    'dPProgrammed', 'retentionFactor', 'dP', 'dVQ', 'senseMargin'});
+recurrent = collectSignals(recurrentOut, fetft_recurrent_hybrid_signal_names());
 sequence = collectSignals(sequenceOut, { ...
     'phase', 'vEff17', 'vEff18', 'p17Preisach', 'p18Preisach', ...
     'dPProgrammed', 'retentionFactor', 'p17', 'p18', 'dP', ...
@@ -44,9 +43,9 @@ rows = addRow(rows, 'I01', 'Explicit domain fractions f_i', ...
     i01Evidence(recurrent), ...
     'Gong supports a multiple-domain NLS picture and switched-polarization fraction versus pulse duration, but the exact f_i state-vector interface is not stated.');
 rows = addRow(rows, 'I02', 'Per-domain rates r_i_plus and r_i_minus', ...
-    'NOT_IN_PAPERS', 'NOT_COUNTED', ...
-    'The exact bidirectional rate-state equation is not present in the attached papers.', ...
-    'Gong gives voltage-dependent characteristic switching times and switched-polarization relationships; it does not state a per-domain r_i_plus/r_i_minus ODE interface.');
+    'PARTIAL_IN_PAPERS', i02Status(recurrent), ...
+    i02Evidence(recurrent), ...
+    'Mo and Gong support NLS retention over short intervals with voltage/depolarization-field-dependent characteristic switching times. The exact r_i_plus/r_i_minus ODE notation is an implementation interface.');
 rows = addRow(rows, 'I03', 'Fixed-rate override for analytic oracle tests', ...
     'NOT_IN_PAPERS', 'NOT_COUNTED', ...
     'A fixed-rate debug oracle is a testbench feature, not a requirement stated by either paper.', ...
@@ -72,8 +71,8 @@ rows = addRow(rows, 'I08', 'Retention-disabled overlay sweeps', ...
     'Retention-disabled overlays are a validation convenience; they are not stated in either paper as a model requirement.', ...
     'No paper basis found for this exact overlay test.');
 rows = addRow(rows, 'I09', 'Standalone Preisach reference comparison across amplitude, width, and history', ...
-    'PARTIAL_IN_PAPERS', i09Status(sequence), ...
-    i09Evidence(sequence), ...
+    'PARTIAL_IN_PAPERS', i09Status(sequence, preisachSweep), ...
+    i09Evidence(sequence, preisachSweep), ...
     'Ni demonstrates dependence on amplitude, pulse width, and history. A standalone Simulink-vs-reference harness is not directly specified.');
 
 coreRows = {};
@@ -97,7 +96,7 @@ coreResults = cell2table(coreRows, 'VariableNames', ...
 
 writeReport(reportFile, results, coreResults);
 writetable(results, csvFile);
-save(matFile, 'results', 'coreResults', 'recurrentOut', 'sequenceOut');
+save(matFile, 'results', 'coreResults', 'recurrentOut', 'sequenceOut', 'preisachSweep');
 
 fprintf('Wrote report: %s\n', reportFile);
 fprintf('Wrote CSV:    %s\n', csvFile);
@@ -114,8 +113,17 @@ fprintf('Core paper-derived behavior: PASS=%d, PARTIAL=%d, FAIL=%d\n', ...
 end
 
 function status = i01Status(data)
-hasExplicitDomainState = isfield(data, 'f') || isfield(data, 'domainFraction') || isfield(data, 'domainFractions');
-if hasExplicitDomainState
+hasDomains = all(hasNumberedFields(data, 'f17_', 8)) && all(hasNumberedFields(data, 'f18_', 8));
+if ~hasDomains
+    status = 'FAIL';
+    return;
+end
+
+fOk = numberedValuesInRange(data, 'f17_', 8, -1e-9, 1.0 + 1e-9) && ...
+    numberedValuesInRange(data, 'f18_', 8, -1e-9, 1.0 + 1e-9);
+reconOk = reconstructionError(data, 'f17_', 'p17') < 1e-9 && ...
+    reconstructionError(data, 'f18_', 'p18') < 1e-9;
+if fOk && reconOk
     status = 'PASS';
 else
     status = 'FAIL';
@@ -123,8 +131,60 @@ end
 end
 
 function evidence = i01Evidence(data)
-maxDP = max(abs(data.dP.values));
-evidence = sprintf('The current model logs scalar P17/P18/dP only (max |dP| %.4g); it does not expose NLS domain population fractions.', maxDP);
+err17 = reconstructionError(data, 'f17_', 'p17');
+err18 = reconstructionError(data, 'f18_', 'p18');
+minF = min([numberedMin(data, 'f17_', 8), numberedMin(data, 'f18_', 8)]);
+maxF = max([numberedMax(data, 'f17_', 8), numberedMax(data, 'f18_', 8)]);
+evidence = sprintf('Eight f_i bins per FeTFT branch are logged; f range %.4g..%.4g, reconstruction errors P17=%.3g and P18=%.3g.', ...
+    minF, maxF, err17, err18);
+end
+
+function status = i02Status(data)
+hasRates = all(hasNumberedFields(data, 'rPlus17_', 8)) && ...
+    all(hasNumberedFields(data, 'rMinus17_', 8)) && ...
+    all(hasNumberedFields(data, 'rPlus18_', 8)) && ...
+    all(hasNumberedFields(data, 'rMinus18_', 8));
+if ~hasRates
+    status = 'FAIL';
+    return;
+end
+
+phase = data.phase.values;
+writeMask = phase == 1;
+holdMask = phase == 2 | phase == 3;
+writeRatesZero = numberedMax(data, 'rPlus17_', 8, writeMask) == 0.0 && ...
+    numberedMax(data, 'rMinus17_', 8, writeMask) == 0.0 && ...
+    numberedMax(data, 'rPlus18_', 8, writeMask) == 0.0 && ...
+    numberedMax(data, 'rMinus18_', 8, writeMask) == 0.0;
+holdRatesActive = numberedMax(data, 'rPlus17_', 8, holdMask) > 0.0 || ...
+    numberedMax(data, 'rMinus17_', 8, holdMask) > 0.0 || ...
+    numberedMax(data, 'rPlus18_', 8, holdMask) > 0.0 || ...
+    numberedMax(data, 'rMinus18_', 8, holdMask) > 0.0;
+finiteRates = numberedValuesInRange(data, 'rPlus17_', 8, 0.0, Inf) && ...
+    numberedValuesInRange(data, 'rMinus17_', 8, 0.0, Inf) && ...
+    numberedValuesInRange(data, 'rPlus18_', 8, 0.0, Inf) && ...
+    numberedValuesInRange(data, 'rMinus18_', 8, 0.0, Inf);
+
+if writeRatesZero && holdRatesActive && finiteRates
+    status = 'PASS';
+else
+    status = 'FAIL';
+end
+end
+
+function evidence = i02Evidence(data)
+phase = data.phase.values;
+holdMask = phase == 2 | phase == 3;
+maxRate = max([numberedMax(data, 'rPlus17_', 8, holdMask), ...
+    numberedMax(data, 'rMinus17_', 8, holdMask), ...
+    numberedMax(data, 'rPlus18_', 8, holdMask), ...
+    numberedMax(data, 'rMinus18_', 8, holdMask)]);
+writeMaxRate = max([numberedMax(data, 'rPlus17_', 8, phase == 1), ...
+    numberedMax(data, 'rMinus17_', 8, phase == 1), ...
+    numberedMax(data, 'rPlus18_', 8, phase == 1), ...
+    numberedMax(data, 'rMinus18_', 8, phase == 1)]);
+evidence = sprintf('Per-domain equivalent NLS rates are logged; max hold/read rate %.4g s^-1 and max write rate %.4g s^-1.', ...
+    maxRate, writeMaxRate);
 end
 
 function data = collectSignals(simOut, names)
@@ -144,11 +204,14 @@ function status = i05Status(data)
 phase = data.phase.values;
 hasHold = any(phase == 2);
 retentionChanges = min(data.retentionFactor.values(phase == 2)) < 0.99;
-hasFieldControl = isfield(data, 'vFeHold') || isfield(data, 'eDep') || isfield(data, 'eHold');
-if hasHold && retentionChanges && hasFieldControl
+hasFieldControl = isfield(data, 'vFe17') && isfield(data, 'vFe18') && ...
+    isfield(data, 'eDep17') && isfield(data, 'eDep18') && ...
+    isfield(data, 'eHold17') && isfield(data, 'eHold18') && ...
+    isfield(data, 'eImp17') && isfield(data, 'eImp18');
+signOk = mean(data.eDep17.values(phase == 2) .* data.p17.values(phase == 2) <= 1e-9) > 0.95 && ...
+    mean(data.eDep18.values(phase == 2) .* data.p18.values(phase == 2) <= 1e-9) > 0.95;
+if hasHold && retentionChanges && hasFieldControl && signOk
     status = 'PASS';
-elseif hasHold && retentionChanges
-    status = 'FAIL';
 else
     status = 'FAIL';
 end
@@ -157,14 +220,21 @@ end
 function evidence = i05Evidence(data)
 phase = data.phase.values;
 minRetention = min(data.retentionFactor.values(phase == 2));
-evidence = sprintf('HOLD retention changes over time (min factor %.4g), but the current outputs have no V_FE/E_dep/E_hold field-control state.', minRetention);
+maxVfe = max(max(abs(data.vFe17.values(phase == 2))), max(abs(data.vFe18.values(phase == 2))));
+evidence = sprintf('HOLD retention changes over time (min factor %.4g) while V_FE/E_dep/E_hold/E_imp terms are logged; max |V_FE| in hold is %.4g.', ...
+    minRetention, maxVfe);
 end
 
 function status = i06Status(data)
 [ok24, ~] = returnedStateCheck(data, 24e-6);
 [ok48, ~] = returnedStateCheck(data, 48e-6);
-if ok24 && ok48
-    status = 'PARTIAL';
+hasHistory = isfield(data, 'history17Branch') && isfield(data, 'history18Branch') && ...
+    isfield(data, 'history17TurnV') && isfield(data, 'history18TurnV') && ...
+    isfield(data, 'history17TurnP') && isfield(data, 'history18TurnP') && ...
+    isfield(data, 'history17Depth') && isfield(data, 'history18Depth');
+hasBranches = any(abs(data.history17Branch.values) > 0) && any(abs(data.history18Branch.values) > 0);
+if ok24 && ok48 && hasHistory && hasBranches
+    status = 'PASS';
 else
     status = 'FAIL';
 end
@@ -173,23 +243,27 @@ end
 function evidence = i06Evidence(data)
 [~, e24] = returnedStateCheck(data, 24e-6);
 [~, e48] = returnedStateCheck(data, 48e-6);
-evidence = sprintf('Reduced scalar state handoff exists, but no Preisach turning-point/history object is logged. %s %s', e24, e48);
+maxDepth = max(max(data.history17Depth.values), max(data.history18Depth.values));
+evidence = sprintf('Serializable branch/turning-point/depth history fields are logged; max history depth %.4g. %s %s', ...
+    maxDepth, e24, e48);
 end
 
-function status = i09Status(data)
+function status = i09Status(data, sweep)
 finite = all(isfinite(data.vEff17.values)) && all(isfinite(data.dP.values));
 hasPulseEffect = max(abs(data.vEff17.values)) > 0.1 && max(abs(data.dP.values)) > 0.1;
-if finite && hasPulseEffect
-    status = 'PARTIAL';
+if finite && hasPulseEffect && sweep.pass
+    status = 'PASS';
 else
     status = 'FAIL';
 end
 end
 
-function evidence = i09Evidence(data)
+function evidence = i09Evidence(data, sweep)
 maxVeff = max(max(abs(data.vEff17.values)), max(abs(data.vEff18.values)));
 maxDP = max(abs(data.dP.values));
-evidence = sprintf('A single finite pulse sequence exercises amplitude/time response (max |Veff| %.4g V, max |dP| %.4g), but no amplitude/width/history sweep or standalone reference overlay is run.', maxVeff, maxDP);
+evidence = sprintf('Simulink sequence is finite (max |Veff| %.4g V, max |dP| %.4g). Standalone Preisach sweep: %d cases, %d amplitudes, %d widths, %d starts, max error %.3g, unsaturated=%d.', ...
+    maxVeff, maxDP, sweep.nCases, sweep.nAmplitudes, sweep.nWidths, ...
+    sweep.nStartStates, sweep.maxAbsError, sweep.hasUnsaturated);
 end
 
 function status = core01Status(data)
@@ -291,6 +365,58 @@ end
 function value = nearestAt(t, y, target)
 [~, idx] = min(abs(t - target));
 value = y(idx);
+end
+
+function present = hasNumberedFields(data, prefix, n)
+present = false(1, n);
+for idx = 1:n
+    present(idx) = isfield(data, sprintf('%s%d', prefix, idx));
+end
+end
+
+function ok = numberedValuesInRange(data, prefix, n, lower, upper)
+ok = true;
+for idx = 1:n
+    values = data.(sprintf('%s%d', prefix, idx)).values;
+    ok = ok && all(isfinite(values)) && all(values >= lower) && all(values <= upper);
+end
+end
+
+function value = numberedMin(data, prefix, n, mask)
+if nargin < 4
+    mask = [];
+end
+value = Inf;
+for idx = 1:n
+    values = data.(sprintf('%s%d', prefix, idx)).values;
+    if ~isempty(mask)
+        values = values(mask);
+    end
+    value = min(value, min(values));
+end
+end
+
+function value = numberedMax(data, prefix, n, mask)
+if nargin < 4
+    mask = [];
+end
+value = -Inf;
+for idx = 1:n
+    values = data.(sprintf('%s%d', prefix, idx)).values;
+    if ~isempty(mask)
+        values = values(mask);
+    end
+    value = max(value, max(values));
+end
+end
+
+function err = reconstructionError(data, prefix, pName)
+p = zeros(size(data.(pName).values));
+for idx = 1:8
+    f = data.(sprintf('%s%d', prefix, idx)).values;
+    p = p + (2.0 .* f - 1.0) / 8.0;
+end
+err = max(abs(p - data.(pName).values));
 end
 
 function n = countStatus(results, status)

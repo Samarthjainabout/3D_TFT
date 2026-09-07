@@ -20,60 +20,34 @@ fprintf('External test specification: %s\n', docPath);
 
 recurrentOut = build_fetft_recurrent_hybrid_model(true);
 sequenceOut = build_fetft_preisach_sequence_model(true);
+preisachSweep = fetft_preisach_reference_sweep();
 
-recurrent = collectSignals(recurrentOut, { ...
-    'phase', 'writeCommand', 'pStart17', 'pStart18', 'p17', 'p18', ...
-    'dPProgrammed', 'retentionFactor', 'dP', 'dVQ', 'senseMargin'});
+recurrent = collectSignals(recurrentOut, fetft_recurrent_hybrid_signal_names());
 sequence = collectSignals(sequenceOut, { ...
     'phase', 'vEff17', 'vEff18', 'p17Preisach', 'p18Preisach', ...
     'dPProgrammed', 'retentionFactor', 'p17', 'p18', 'dP', ...
     'polarizationGain', 'dVQ', 'loopGain', 'senseMargin'});
+strict = fetft_strict_harness_checks();
 
 rows = {};
-rows = addCase(rows, 'TC01', 'FAIL', ...
-    'Frozen-state and zero-field retention controls are not exposed.', ...
-    'Missing separate state-update enables, retention_enable, and zero-field K_dep/E_hold/E_imp controls.');
-rows = addCase(rows, 'TC02', 'FAIL', ...
-    'Constant-rate analytic oracle cannot be driven through the current model.', ...
-    'Missing domain fraction f_i logging, N-domain configuration, fixed-rate override, and depolarization-feedback disable.');
-rows = addCase(rows, 'TC03', tc03Status(sequence), ...
-    tc03Evidence(sequence), ...
-    'Full pass still requires standalone Preisach reference overlay across amplitudes, widths, history states, and retention-disabled controls.');
-rows = addCase(rows, 'TC04', tc04Status(recurrent), ...
-    tc04Evidence(recurrent), ...
-    'Retention-disabled control and individual domain-rate ordering are not implemented.');
-rows = addCase(rows, 'TC05', 'FAIL', ...
-    'No-op HOLD->WRITE->HOLD handoff without a write pulse is not represented by the generated sequence.', ...
-    'Missing mode ownership switch with both update paths frozen and same-time f_i/P handoff checker.');
-rows = addCase(rows, 'TC06', tc06Status(recurrent), ...
-    tc06Evidence(recurrent), ...
-    'Full pass requires waits of 1 us, 1 ms, and 100 s plus isolated programming replay from the same complete domain/history state.');
-rows = addCase(rows, 'TC07', tc07Status(recurrent), ...
-    tc07Evidence(recurrent), ...
-    'Full pass requires a partial opposite-polarity pulse followed by verified full erase and polarity-reversed mirror run.');
-rows = addCase(rows, 'TC08', 'FAIL', ...
-    'Intermediate scalar P states can be scheduled, but complete domain populations and Preisach history are not saved or replayed.', ...
-    'Missing f_i arrays, turning-point/history state, and same-complete-state replay checks.');
-rows = addCase(rows, 'TC09', 'FAIL', ...
-    'Depolarization and hold-field controls are not parameters in the current reduced retention law.', ...
-    'Missing K_dep, E_hold, E_imp, compensation-field, and initial-rate sign checks.');
-rows = addCase(rows, 'TC10', 'FAIL', ...
-    'The current model stores a scalar polarization pair, not multiple domain populations with identical net P.', ...
-    'Missing N=2 domain injection, per-domain rates, and derivative oracle.');
-rows = addCase(rows, 'TC11', tc11Status(recurrent), ...
-    tc11Evidence(recurrent), ...
-    'Full pass requires a no-read versus ideal-observation comparison and explicit finite read-voltage pulse-rate modeling.');
-rows = addCase(rows, 'TC12', tc12Status(recurrent, sequence), ...
-    tc12Evidence(recurrent, sequence), ...
-    'Full pass requires tighter tolerance reruns, segmented-vs-continuous hold, complete save/restore, and long-time stress.');
-rows = addCase(rows, 'E2E01', 'FAIL', ...
-    'The current recurrent sequence covers repeated write-hold-read sign reversal on a microsecond schedule.', ...
-    'The DOCX end-to-end sequence also requires negative conditioning before positive write, 1 ms and 100 s holds, frozen no-op handoff, partial positive pulse after long hold, negative erase, and retention-disabled overlay.');
+rows = addStrictCase(rows, strict, 'TC01');
+rows = addStrictCase(rows, strict, 'TC02');
+rows = addStrictCase(rows, strict, 'TC03');
+rows = addStrictCase(rows, strict, 'TC04');
+rows = addStrictCase(rows, strict, 'TC05');
+rows = addStrictCase(rows, strict, 'TC06');
+rows = addStrictCase(rows, strict, 'TC07');
+rows = addStrictCase(rows, strict, 'TC08');
+rows = addStrictCase(rows, strict, 'TC09');
+rows = addStrictCase(rows, strict, 'TC10');
+rows = addStrictCase(rows, strict, 'TC11');
+rows = addStrictCase(rows, strict, 'TC12');
+rows = addStrictCase(rows, strict, 'E2E01');
 
 results = cell2table(rows, 'VariableNames', {'CaseId', 'Status', 'Evidence', 'MissingOrFailReason'});
 writeReport(reportFile, results, docPath);
 writetable(results, csvFile);
-save(matFile, 'results', 'recurrentOut', 'sequenceOut');
+save(matFile, 'results', 'recurrentOut', 'sequenceOut', 'preisachSweep', 'strict');
 
 fprintf('Wrote report: %s\n', reportFile);
 fprintf('Wrote CSV:    %s\n', csvFile);
@@ -94,18 +68,24 @@ function rows = addCase(rows, caseId, status, evidence, missing)
 rows(end + 1, :) = {caseId, status, evidence, missing};
 end
 
-function status = tc03Status(sequence)
-if allFinite(sequence, {'phase', 'vEff17', 'vEff18', 'dPProgrammed', 'dP'})
+function rows = addStrictCase(rows, strict, caseId)
+item = strict.(caseId);
+rows = addCase(rows, caseId, item.status, item.evidence, item.missing);
+end
+
+function status = tc03Status(sequence, sweep)
+if allFinite(sequence, {'phase', 'vEff17', 'vEff18', 'dPProgrammed', 'dP'}) && sweep.pass
     status = 'PARTIAL';
 else
     status = 'FAIL';
 end
 end
 
-function evidence = tc03Evidence(sequence)
+function evidence = tc03Evidence(sequence, sweep)
 maxAbsDP = max(abs(sequence.dP.values));
 maxVeff = max(max(abs(sequence.vEff17.values)), max(abs(sequence.vEff18.values)));
-evidence = sprintf('One-write Preisach sequence runs with finite traces; max |Veff| = %.3g V and max |dP| = %.3g.', maxVeff, maxAbsDP);
+evidence = sprintf('One-write Preisach sequence runs with finite traces; max |Veff| = %.3g V and max |dP| = %.3g. Standalone sweep passes %d amplitude/width/history/polarity cases with max error %.3g.', ...
+    maxVeff, maxAbsDP, sweep.nCases, sweep.maxAbsError);
 end
 
 function status = tc04Status(recurrent)
@@ -159,6 +139,42 @@ t = recurrent.dP.time;
 dP26 = interpAt(t, recurrent.dP.values, 26e-6);
 dP50 = interpAt(t, recurrent.dP.values, 50e-6);
 evidence = sprintf('Included repeated sequence reverses sign: dP at 26 us = %.4g, dP at 50 us = %.4g.', dP26, dP50);
+end
+
+function status = tc08Status(recurrent)
+hasDomains = isfield(recurrent, 'f17_1') && isfield(recurrent, 'f18_1');
+hasHistory = isfield(recurrent, 'history17Branch') && isfield(recurrent, 'history18Branch');
+if hasDomains && hasHistory
+    status = 'PARTIAL';
+else
+    status = 'FAIL';
+end
+end
+
+function evidence = tc08Evidence(recurrent)
+maxDepth = max(max(recurrent.history17Depth.values), max(recurrent.history18Depth.values));
+evidence = sprintf('Domain fraction bins and compact Preisach branch/turning-point/depth history are logged; max history depth %.4g.', maxDepth);
+end
+
+function status = tc09Status(recurrent)
+hasFields = isfield(recurrent, 'vFe17') && isfield(recurrent, 'eDep17') && ...
+    isfield(recurrent, 'eHold17') && isfield(recurrent, 'eImp17');
+if hasFields
+    status = 'PARTIAL';
+else
+    status = 'FAIL';
+end
+end
+
+function evidence = tc09Evidence(recurrent)
+phase = recurrent.phase.values;
+holdMask = phase == 2 | phase == 3;
+maxVfe = max(max(abs(recurrent.vFe17.values(holdMask))), max(abs(recurrent.vFe18.values(holdMask))));
+maxRate = max([numberedMax(recurrent, 'rPlus17_', 8, holdMask), ...
+    numberedMax(recurrent, 'rMinus17_', 8, holdMask), ...
+    numberedMax(recurrent, 'rPlus18_', 8, holdMask), ...
+    numberedMax(recurrent, 'rMinus18_', 8, holdMask)]);
+evidence = sprintf('V_FE/E_dep/E_hold/E_imp and per-domain rates are logged; max |V_FE| %.4g and max NLS rate %.4g s^-1 during hold/read.', maxVfe, maxRate);
 end
 
 function status = tc11Status(recurrent)
@@ -243,6 +259,17 @@ function value = interpAt(t, y, target)
 value = y(idx);
 end
 
+function value = numberedMax(data, prefix, n, mask)
+value = -Inf;
+for idx = 1:n
+    values = data.(sprintf('%s%d', prefix, idx)).values;
+    if nargin >= 4
+        values = values(mask);
+    end
+    value = max(value, max(values));
+end
+end
+
 function ok = allFinite(data, names)
 ok = true;
 for idx = 1:numel(names)
@@ -262,6 +289,9 @@ closer = onCleanup(@() fclose(fid));
 fprintf(fid, '# FeFET Combined Model Testbench Results\n\n');
 fprintf(fid, 'External test specification: `%s`\n\n', docPath);
 fprintf(fid, 'This report tests the current reduced Simulink/MATLAB implementation. The DOCX is treated as an external test specification, not as executable model instructions.\n\n');
+fprintf(fid, 'Summary: PASS=%d, PARTIAL=%d, FAIL=%d.\n\n', ...
+    sum(strcmp(results.Status, 'PASS')), sum(strcmp(results.Status, 'PARTIAL')), ...
+    sum(strcmp(results.Status, 'FAIL')));
 fprintf(fid, '| Case | Status | Evidence | Missing or fail reason |\n');
 fprintf(fid, '|---|---|---|---|\n');
 for idx = 1:height(results)

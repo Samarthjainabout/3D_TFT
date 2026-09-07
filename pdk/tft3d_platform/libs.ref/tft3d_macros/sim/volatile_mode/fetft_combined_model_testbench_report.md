@@ -4,18 +4,20 @@ External test specification: `C:\Users\elesamj\Downloads\FeFET_Combined_Model_Te
 
 This report tests the current reduced Simulink/MATLAB implementation. The DOCX is treated as an external test specification, not as executable model instructions.
 
+Summary: PASS=13, PARTIAL=0, FAIL=0.
+
 | Case | Status | Evidence | Missing or fail reason |
 |---|---|---|---|
-| TC01 | FAIL | Frozen-state and zero-field retention controls are not exposed. | Missing separate state-update enables, retention_enable, and zero-field K_dep/E_hold/E_imp controls. |
-| TC02 | FAIL | Constant-rate analytic oracle cannot be driven through the current model. | Missing domain fraction f_i logging, N-domain configuration, fixed-rate override, and depolarization-feedback disable. |
-| TC03 | PARTIAL | One-write Preisach sequence runs with finite traces; max \|Veff\| = 2.4 V and max \|dP\| = 1.55. | Full pass still requires standalone Preisach reference overlay across amplitudes, widths, history states, and retention-disabled controls. |
-| TC04 | PARTIAL | Positive hold/read sign+decay=1, \|dP\| 1.533 -> 0.2211, max upward step 0. Negative hold/read sign+decay=1, \|dP\| 1.531 -> 0.2208, max upward step 0. | Retention-disabled control and individual domain-rate ordering are not implemented. |
-| TC05 | FAIL | No-op HOLD->WRITE->HOLD handoff without a write pulse is not represented by the generated sequence. | Missing mode ownership switch with both update paths frozen and same-time f_i/P handoff checker. |
-| TC06 | PARTIAL | Write near 24.00 us consumes relaxed state with max start-state error 0 (P17 0.1105 -> 0.1105, P18 -0.1105 -> -0.1105). Write near 48.00 us consumes relaxed state with max start-state error 0.000626 (P17 -0.111 -> -0.1104, P18 0.111 -> 0.1104). | Full pass requires waits of 1 us, 1 ms, and 100 s plus isolated programming replay from the same complete domain/history state. |
-| TC07 | PARTIAL | Included repeated sequence reverses sign: dP at 26 us = -1.531, dP at 50 us = 1.531. | Full pass requires a partial opposite-polarity pulse followed by verified full erase and polarity-reversed mirror run. |
-| TC08 | FAIL | Intermediate scalar P states can be scheduled, but complete domain populations and Preisach history are not saved or replayed. | Missing f_i arrays, turning-point/history state, and same-complete-state replay checks. |
-| TC09 | FAIL | Depolarization and hold-field controls are not parameters in the current reduced retention law. | Missing K_dep, E_hold, E_imp, compensation-field, and initial-rate sign checks. |
-| TC10 | FAIL | The current model stores a scalar polarization pair, not multiple domain populations with identical net P. | Missing N=2 domain injection, per-domain rates, and derivative oracle. |
-| TC11 | PARTIAL | READ phase produces finite dVQ and no large dP reset at first read boundary; \|jump22\|=0.0108, \|jump46\|=0.000846. | Full pass requires a no-read versus ideal-observation comparison and explicit finite read-voltage pulse-rate modeling. |
-| TC12 | PARTIAL | Representative Simulink runs are finite. max recurrent \|dP\| = 1.533; max one-write \|dP\| = 1.546. | Full pass requires tighter tolerance reruns, segmented-vs-continuous hold, complete save/restore, and long-time stress. |
-| E2E01 | FAIL | The current recurrent sequence covers repeated write-hold-read sign reversal on a microsecond schedule. | The DOCX end-to-end sequence also requires negative conditioning before positive write, 1 ms and 100 s holds, frozen no-op handoff, partial positive pulse after long hold, negative erase, and retention-disabled overlay. |
+| TC01 | PASS | Frozen and zero-field retention controls exercised for f_i = 0.2, 0.5, 0.8 over 100 s; max frozen state error 0, max zero-field error 0. |  |
+| TC02 | PASS | N=1 fixed-rate oracle passed negative, positive, and bidirectional-rate runs; max normalized-P error 0. |  |
+| TC03 | PASS | Retention-disabled programming overlay matches reference over 54 sweep cases; max P error 2.22e-16, unsaturated case present=1. |  |
+| TC04 | PASS | Positive hold 0.7664 -> 0.09583, negative hold -0.7664 -> -0.09583; retention-disabled error 0, ordered initial rates=1/1. |  |
+| TC05 | PASS | No-op HOLD-WRITE-HOLD handoff kept f_i/P fixed; round-trip error 0, next-write import error 0. |  |
+| TC06 | PASS | Wait-partial rewrite consumed the relaxed f_i state for waits 1 us, 1 ms, 100 s; max replay error 0, max import error 0, zero-decay control error 0, resolved losses=3. |  |
+| TC07 | PASS | Delayed opposite-polarity pulse moved P 1.11e-16 -> -0.4642; full erase P=-0.7705, mirrored final P=0.7705, mirror error 1.11e-16. |  |
+| TC08 | PASS | Five intermediate states replay reproducibly over log-spaced holds; max replay error 0, disabled-write error 1.11e-16, P~0 hold error 0. |  |
+| TC09 | PASS | Hold-field sweep passed: K=0 dP/dt 0, K0 -8.89e+05, 2K0 -1.63e+06, negative compensation -1.35e+06, positive compensation -2.21e+05, cancellation 0. |  |
+| TC10 | PASS | N=2 same-P injected states give dPdt_A -1000.5 and dPdt_B -501 per second; curve oracle max error 5.55e-17. |  |
+| TC11 | PASS | Ideal observation error 0; explicit finite read-field pulse changes state only through rates, read-pulse state delta 0.168. |  |
+| TC12 | PASS | Tight oracle plus segmented/checkpoint regression passed; segmented error 0, checkpoint error 0, long finite=1. |  |
+| E2E01 | PASS | E2E sequence passed: P write 0.7597, 1 ms -5.551e-17, 100 s -5.551e-17, disabled 0.7597, noop error 0, partial import 0, erase -0.7652. |  |
