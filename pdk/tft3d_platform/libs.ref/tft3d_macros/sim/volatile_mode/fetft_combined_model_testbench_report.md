@@ -1,0 +1,23 @@
+# FeFET Combined Model Testbench Results
+
+External test specification: `C:\Users\elesamj\Downloads\FeFET_Combined_Model_Testbench.docx`
+
+This report tests the current reduced Simulink/MATLAB implementation. The DOCX is treated as an external test specification, not as executable model instructions.
+
+Summary: PASS=13, PARTIAL=0, FAIL=0.
+
+| Case | Status | Evidence | Missing or fail reason |
+|---|---|---|---|
+| TC01 | PASS | Frozen and zero-field retention controls exercised for f_i = 0.2, 0.5, 0.8 over 100 s; max frozen state error 0, max zero-field error 0. |  |
+| TC02 | PASS | N=1 fixed-rate oracle passed negative, positive, and bidirectional-rate runs; max normalized-P error 0. |  |
+| TC03 | PASS | Retention-disabled programming overlay matches reference over 54 sweep cases; max P error 2.22e-16, unsaturated case present=1. |  |
+| TC04 | PASS | Positive hold 0.7664 -> 0.09583, negative hold -0.7664 -> -0.09583; retention-disabled error 0, ordered initial rates=1/1. |  |
+| TC05 | PASS | No-op HOLD-WRITE-HOLD handoff kept f_i/P fixed; round-trip error 0, next-write import error 0. |  |
+| TC06 | PASS | Wait-partial rewrite consumed the relaxed f_i state for waits 1 us, 1 ms, 100 s; max replay error 0, max import error 0, zero-decay control error 0, resolved losses=3. |  |
+| TC07 | PASS | Delayed opposite-polarity pulse moved P 1.11e-16 -> -0.4642; full erase P=-0.7705, mirrored final P=0.7705, mirror error 1.11e-16. |  |
+| TC08 | PASS | Five intermediate states replay reproducibly over log-spaced holds; max replay error 0, disabled-write error 1.11e-16, P~0 hold error 0. |  |
+| TC09 | PASS | Hold-field sweep passed: K=0 dP/dt 0, K0 -8.89e+05, 2K0 -1.63e+06, negative compensation -1.35e+06, positive compensation -2.21e+05, cancellation 0. |  |
+| TC10 | PASS | N=2 same-P injected states give dPdt_A -1000.5 and dPdt_B -501 per second; curve oracle max error 5.55e-17. |  |
+| TC11 | PASS | Ideal observation error 0; explicit finite read-field pulse changes state only through rates, read-pulse state delta 0.168. |  |
+| TC12 | PASS | Tight oracle plus segmented/checkpoint regression passed; segmented error 0, checkpoint error 0, long finite=1. |  |
+| E2E01 | PASS | E2E sequence passed: P write 0.7597, 1 ms -5.551e-17, 100 s -5.551e-17, disabled 0.7597, noop error 0, partial import 0, erase -0.7652. |  |

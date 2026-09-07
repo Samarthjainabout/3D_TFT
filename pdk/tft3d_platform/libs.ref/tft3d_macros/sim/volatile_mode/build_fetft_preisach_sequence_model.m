@@ -1,0 +1,179 @@
+function simOut = build_fetft_preisach_sequence_model(runSimulation)
+%BUILD_FETFT_PREISACH_SEQUENCE_MODEL Create a full write-hold-read Simulink model.
+%
+% This model keeps the existing NLS retention law but replaces the simple
+% write initializer with a reduced Preisach programming stage:
+%   1. WRITE: RC-delayed effective FE voltage drives Preisach tanh branches.
+%   2. HOLD: programmed differential polarization decays by NLS retention.
+%   3. READ: remaining polarization is converted to DeltaV_Q with read gain.
+%
+% Preisach programming abstraction adapted from:
+% K. Ni, M. Jerry, J. A. Smith, and S. Datta, "A Circuit Compatible Accurate
+% Compact Model for Ferroelectric-FETs," 2018 IEEE Symposium on VLSI
+% Technology, pp. 131-132, 2018.
+%
+% NLS/detrapping retention mechanism adapted from:
+% F. Mo et al., "Efficient Erase Operation by GIDL Current for 3D Structure
+% FeFETs With Gate Stack Engineering and Compact Long-Term Retention Model,"
+% IEEE Journal of the Electron Devices Society, vol. 10, pp. 115-122, 2022,
+% doi: 10.1109/JEDS.2022.3142046.
+
+if nargin < 1
+    runSimulation = true;
+end
+
+if isempty(ver('simulink'))
+    error('Simulink is not available in this MATLAB installation.');
+end
+
+thisDir = fileparts(mfilename('fullpath'));
+modelName = 'fetft_preisach_write_hold_read';
+modelFile = fullfile(thisDir, [modelName '.slx']);
+resultsFile = fullfile(thisDir, 'fetft_preisach_sequence_results.mat');
+plotFile = fullfile(thisDir, 'fetft_preisach_sequence_response.png');
+
+params = defaultParameters();
+preisachSequenceInput = fetft_preisach_sequence_dataset(params.tStop, params.maxStep);
+assignin('base', 'preisachSequenceInput', preisachSequenceInput);
+
+if bdIsLoaded(modelName)
+    close_system(modelName, 0);
+end
+
+new_system(modelName);
+set_param(modelName, ...
+    'StopTime', num2str(params.tStop), ...
+    'Solver', 'FixedStepDiscrete', ...
+    'FixedStep', num2str(params.maxStep), ...
+    'SaveOutput', 'on', ...
+    'ReturnWorkspaceOutputs', 'on', ...
+    'SignalLogging', 'off', ...
+    'InitFcn', 'preisachSequenceInput = fetft_preisach_sequence_dataset;');
+
+createBlocks(modelName);
+save_system(modelName, modelFile);
+
+fprintf('Created Preisach write-hold-read model: %s\n', modelFile);
+
+if runSimulation
+    simOut = sim(modelName);
+    save(resultsFile, 'simOut', 'params');
+    makePlot(simOut, plotFile);
+    fprintf('Simulation complete: %s\n', resultsFile);
+    fprintf('Response plot: %s\n', plotFile);
+else
+    simOut = [];
+end
+
+end
+
+function params = defaultParameters()
+params.tStop = 40e-6;
+params.maxStep = 5e-8;
+end
+
+function createBlocks(modelName)
+block = @(name) [modelName '/' name];
+
+add_block('simulink/Sources/From Workspace', block('Preisach sequence input'), ...
+    'VariableName', 'preisachSequenceInput', ...
+    'Interpolate', 'off', ...
+    'OutputAfterFinalValue', 'Holding final value', ...
+    'Position', [80 225 255 270]);
+
+add_block('simulink/Signal Routing/Demux', block('output demux'), ...
+    'Outputs', '17', ...
+    'Position', [335 45 340 725]);
+
+signals = { ...
+    'phase', 'vProg17', 'vProg18', 'vEff17', 'vEff18', ...
+    'p17Preisach', 'p18Preisach', 'dPProgrammed', 'retentionFactor', ...
+    'p17', 'p18', 'dP', 'polarizationGain', 'dVQ', 'loopGain', ...
+    'senseMargin', 'refreshNeeded'};
+
+for idx = 1:numel(signals)
+    y = 20 + 38 * idx;
+    outBlock = block(['to_' signals{idx}]);
+    add_block('simulink/Sinks/To Workspace', outBlock, ...
+        'VariableName', signals{idx}, ...
+        'SaveFormat', 'Structure With Time', ...
+        'Position', [430 y 565 y + 24]);
+    add_line(modelName, sprintf('output demux/%d', idx), ...
+        ['to_' signals{idx} '/1'], 'autorouting', 'on');
+end
+
+add_block('simulink/Signal Routing/Mux', block('scope mux'), ...
+    'Inputs', '6', ...
+    'Position', [635 100 640 240]);
+add_block('simulink/Sinks/Scope', block('Preisach sequence scope'), ...
+    'Position', [715 120 885 225]);
+
+add_line(modelName, 'Preisach sequence input/1', 'output demux/1', 'autorouting', 'on');
+add_line(modelName, 'output demux/4', 'scope mux/1', 'autorouting', 'on');
+add_line(modelName, 'output demux/5', 'scope mux/2', 'autorouting', 'on');
+add_line(modelName, 'output demux/8', 'scope mux/3', 'autorouting', 'on');
+add_line(modelName, 'output demux/9', 'scope mux/4', 'autorouting', 'on');
+add_line(modelName, 'output demux/12', 'scope mux/5', 'autorouting', 'on');
+add_line(modelName, 'output demux/16', 'scope mux/6', 'autorouting', 'on');
+add_line(modelName, 'scope mux/1', 'Preisach sequence scope/1', 'autorouting', 'on');
+
+annotationText = sprintf([ ...
+    'Full write-hold-read model for volatile FeTFT bitcell\n', ...
+    'WRITE uses reduced Preisach programming: F_up/down(Veff)=Ps*tanh(alpha*(Veff +/- Vc)) with RC Veff delay.\n', ...
+    'HOLD/READ keep the existing NLS/detrapping state-decay retention law.\n', ...
+    'The From Workspace source is generated by fetft_preisach_sequence_dataset.m for deterministic simulation.']);
+annotation = Simulink.Annotation(modelName, annotationText);
+annotation.Position = [40 365 825 445];
+
+set_param(modelName, 'ZoomFactor', 'FitSystem');
+end
+
+function makePlot(simOut, plotFile)
+time = simOut.get('dP').time;
+vEff17 = simOut.get('vEff17').signals.values;
+vEff18 = simOut.get('vEff18').signals.values;
+dPProgrammed = simOut.get('dPProgrammed').signals.values;
+retentionFactor = simOut.get('retentionFactor').signals.values;
+dP = simOut.get('dP').signals.values;
+dVQ = simOut.get('dVQ').signals.values;
+margin = simOut.get('senseMargin').signals.values;
+
+fig = figure('Visible', 'off', 'Color', 'w');
+tiledlayout(fig, 5, 1, 'TileSpacing', 'compact');
+
+nexttile;
+plot(time * 1e6, vEff17, 'LineWidth', 1.4);
+hold on;
+plot(time * 1e6, vEff18, 'LineWidth', 1.4);
+grid on;
+ylabel('Veff (V)');
+title('Preisach write + NLS retention sequence');
+legend('I17', 'I18', 'Location', 'best');
+
+nexttile;
+plot(time * 1e6, dPProgrammed, '--', 'LineWidth', 1.2);
+hold on;
+plot(time * 1e6, dP, 'LineWidth', 1.5);
+grid on;
+ylabel('DeltaP');
+legend('programmed', 'after retention', 'Location', 'best');
+
+nexttile;
+plot(time * 1e6, retentionFactor, 'LineWidth', 1.5);
+grid on;
+ylabel('retention');
+
+nexttile;
+plot(time * 1e6, dVQ, 'LineWidth', 1.5);
+grid on;
+ylabel('DeltaV_Q (V)');
+
+nexttile;
+plot(time * 1e6, margin, 'LineWidth', 1.5);
+grid on;
+xlabel('time (us)');
+ylabel('margin (V)');
+
+exportgraphics(fig, plotFile, 'Resolution', 160);
+close(fig);
+end
