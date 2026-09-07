@@ -8,12 +8,15 @@ The model is intentionally circuit-level and compact. It is not a replacement fo
 
 The NLS/detrapping retention mechanism is adapted from F. Mo et al., "Efficient Erase Operation by GIDL Current for 3D Structure FeFETs With Gate Stack Engineering and Compact Long-Term Retention Model," IEEE Journal of the Electron Devices Society, vol. 10, pp. 115-122, 2022, doi: 10.1109/JEDS.2022.3142046.
 
+The NLS switching/retention audit also uses N. Gong, X. Sun, H. Jiang, K. S. Chang-Liao, Q. Xia, and T. P. Ma, "Nucleation limited switching (NLS) model for HfO2-based metal-ferroelectric-metal (MFM) capacitors: Switching kinetics and retention characteristics," Applied Physics Letters, vol. 112, 262903, 2018, doi: 10.1063/1.5010207.
+
 The Preisach programming abstraction is adapted from K. Ni, M. Jerry, J. A. Smith, and S. Datta, "A Circuit Compatible Accurate Compact Model for Ferroelectric-FETs," 2018 IEEE Symposium on VLSI Technology, pp. 131-132, 2018.
 
 ## Source References Used
 
 - `FeTFT_DRAM_Like_Dynamic_Cell_Concept_and_Transfer_Function.docx`: source for the 2T-2FeTFT bitcell topology, branch transfer functions, loop-gain condition, write/hold/read operating sequence, and retention-margin equation.
 - F. Mo et al., "Efficient Erase Operation by GIDL Current for 3D Structure FeFETs With Gate Stack Engineering and Compact Long-Term Retention Model," IEEE Journal of the Electron Devices Society, vol. 10, pp. 115-122, 2022, doi: `10.1109/JEDS.2022.3142046`: source for the NLS-style time-dependent depolarization/back-switching retention mechanism and charge-detrapping acceleration concept.
+- N. Gong, X. Sun, H. Jiang, K. S. Chang-Liao, Q. Xia, and T. P. Ma, "Nucleation limited switching (NLS) model for HfO2-based metal-ferroelectric-metal (MFM) capacitors: Switching kinetics and retention characteristics," Applied Physics Letters, vol. 112, 262903, 2018, doi: `10.1063/1.5010207`: source for the NLS domain-nucleation basis, pulse-width/amplitude switching kinetics, voltage-dependent characteristic switching times, and depolarization-field retention iteration.
 - K. Ni, M. Jerry, J. A. Smith, and S. Datta, "A Circuit Compatible Accurate Compact Model for Ferroelectric-FETs," 2018 IEEE Symposium on VLSI Technology, pp. 131-132, 2018: source for the Preisach-based programming abstraction, including tanh saturation branches, history/minor-loop motivation, and RC effective-voltage switching delay.
 
 ## Files
@@ -26,6 +29,8 @@ The Preisach programming abstraction is adapted from K. Ni, M. Jerry, J. A. Smit
 - `fetft_preisach_sequence_vector.m`: equation helper called by the full write-hold-read Preisach sequence model.
 - `fetft_preisach_sequence_dataset.m`: generates the deterministic time/value matrix consumed by the full write-hold-read Simulink model.
 - `fetft_recurrent_hybrid_dataset.m`: generates the deterministic repeated write-hold-read schedule consumed by the recurrent hybrid Simulink model.
+- `run_fefet_combined_model_testbench.m`: runs the DOCX-derived combined-model verification cases against the current Simulink/MATLAB models.
+- `run_fefet_paper_limited_testbench.m`: runs the paper-limited verification audit using only the attached Preisach and NLS papers as the source of requirements.
 - `run_fetft_dynamic_cell_equations.py`: runs the same equations without MATLAB/Simulink for license-independent validation.
 - `fetft_dram_like_dynamic_cell.slx`: generated Simulink model. Rebuild it by rerunning the MATLAB script.
 - `fetft_preisach_write_hold_read.slx`: generated full write-hold-read sequence model using Preisach-style programming.
@@ -34,6 +39,12 @@ The Preisach programming abstraction is adapted from K. Ni, M. Jerry, J. A. Smit
 - `fetft_preisach_sequence_response.png`: generated plot for the full sequence simulation.
 - `fetft_recurrent_hybrid_results.mat`: generated recurrent hybrid simulation output.
 - `fetft_recurrent_hybrid_response.png`: generated plot for the recurrent hybrid simulation.
+- `fetft_combined_model_testbench_report.md`: generated pass/fail/partial report for the combined-model verification cases.
+- `fetft_combined_model_testbench_results.csv`: generated machine-readable case status table.
+- `fetft_combined_model_testbench_results.mat`: generated MATLAB testbench results and captured simulation outputs.
+- `fetft_paper_limited_testbench_report.md`: generated pass/fail/partial report constrained to the attached Preisach and NLS papers.
+- `fetft_paper_limited_testbench_results.csv`: generated machine-readable paper-limited status table.
+- `fetft_paper_limited_testbench_results.mat`: generated MATLAB paper-limited audit results and captured simulation outputs.
 - `fetft_transfer_function_block_diagram.slx`: generated transfer-function block-diagram model.
 - `fetft_transfer_function_block_diagram.png`: exported image of the transfer-function block diagram.
 - `fetft_transfer_function_results.mat`: generated transfer-function diagram simulation output.
@@ -199,6 +210,18 @@ To run the recurrent hybrid model with relaxed-state feedback into later writes:
 ```matlab
 build_fetft_recurrent_hybrid_model
 open_system('fetft_recurrent_hybrid_write_hold_read')
+```
+
+To run the combined-model verification cases from `FeFET_Combined_Model_Testbench.docx`:
+
+```matlab
+run_fefet_combined_model_testbench
+```
+
+To run the paper-limited audit derived only from the attached Preisach and NLS papers:
+
+```matlab
+run_fefet_paper_limited_testbench
 ```
 
 If MATLAB licensing is unavailable, run the equation-level fallback from PowerShell:
